@@ -1,5 +1,9 @@
 module new_MIPTAutocorr
 
-# Write your package code here.
+using QuantumClifford
+
+include("Gates.jl")
+include("Observables.jl")
+include("BrickworkCircuit.jl")
 
 end
