@@ -1,0 +1,10 @@
+# This file is machine-generated - editing it directly is not advised
+
+julia_version = "1.12.2"
+manifest_format = "2.0"
+project_hash = "8bdebd8b223643e4b40637e7a09e18f7b6e526e7"
+
+[[deps.new_MIPTAutocorr]]
+path = "."
+uuid = "724b712f-9c1d-4787-a683-a3dfa2863efe"
+version = "1.0.0-DEV"
