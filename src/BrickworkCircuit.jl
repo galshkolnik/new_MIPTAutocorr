@@ -407,7 +407,7 @@ end
 """
 Measures the entropy each time step.
 """
-function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state, is_pbc::Bool; extract_gates::Bool=false, measure_first_qubit::Bool=true, unitaries_type::Symbol=:Cliffords)
+function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state, is_pbc::Bool; extract_gates::Bool=false, measure_first_qubit::Bool=true, unitaries_type::Symbol=:Cliffords, measure_I5::Bool=true)
     # Validate inputs
     if !(length(p_ar)==L)
         throw(ArgumentError("probability vector p_ar must have length L"))
@@ -445,11 +445,21 @@ function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state
     halfL = Vector{Int}(1:div(L, 2))  # First half of qubits
     A8 = Vector{Int}(1:div(L, 8))  # First antipodal eighth
     B8 = Vector{Int}(div(L, 2)+1:div(5*L, 8))  # Second antipodal eighth
+    if measure_I5
+        I5_parts = [Vector{Int}(1:div(L, 5)),
+                    Vector{Int}(div(L, 5)+1:div(2*L, 5)),
+                    Vector{Int}(div(2*L, 5)+1:div(3*L, 5)),
+                    Vector{Int}(div(3*L, 5)+1:div(4*L, 5)),
+                    Vector{Int}(div(4*L, 5)+1:L)]  # Five equal partitions for I5
+    end
     # Initialize observables record
     entropy_record = Vector{Int}(undef, 2*T)
     N_meas_record = Vector{Int}(undef, 2*T)
     N_det_record = Vector{Int}(undef, 2*T)
     I2_record = Vector{Int}(undef, 2*T)
+    if measure_I5
+        I5_record = Vector{Int}(undef, 2*T)
+    end
     
     # Main circuit loop
     for t in 1:T
@@ -496,6 +506,13 @@ function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state
         I2_record[2*t-1] = state_EE(state, A8)+
                            state_EE(state, B8)-
                            state_EE(state, vcat(A8, B8))
+        if measure_I5
+            i5_t=0
+            for i in 1:5
+                i5_t += state_EE(state, vcat(I5_parts[i], I5_parts[mod(i,5)+1]))-state_EE(state, I5_parts[i])
+            end
+            I5_record[2*t-1] = i5_t
+        end
 
         # === ODD BONDS LAYER ===
         if extract_gates
@@ -542,12 +559,27 @@ function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state
         I2_record[2*t] = state_EE(state, A8)+
                          state_EE(state, B8)-
                          state_EE(state, vcat(A8, B8))
+        if measure_I5
+            i5_t=0
+            for i in 1:5
+                i5_t += state_EE(state, vcat(I5_parts[i], I5_parts[mod(i,5)+1]))-state_EE(state, I5_parts[i])
+            end
+            I5_record[2*t] = i5_t
+        end
     end
     
     if extract_gates
-        return state, entropy_record, N_meas_record, N_det_record, I2_record, measurement_record, gates_record
+        if measure_I5
+            return state, entropy_record, N_meas_record, N_det_record, I2_record, I5_record, measurement_record, gates_record
+        else
+            return state, entropy_record, N_meas_record, N_det_record, I2_record, measurement_record, gates_record
+        end
     else
-        return state, entropy_record, N_meas_record, N_det_record, I2_record, measurement_record
+        if measure_I5
+            return state, entropy_record, N_meas_record, N_det_record, I2_record, I5_record, measurement_record
+        else
+            return state, entropy_record, N_meas_record, N_det_record, I2_record, measurement_record
+        end
     end
 end
 
