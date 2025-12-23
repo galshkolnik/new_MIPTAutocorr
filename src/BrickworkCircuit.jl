@@ -407,7 +407,7 @@ end
 """
 Measures the entropy each time step.
 """
-function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state, is_pbc::Bool; extract_gates::Bool=false, measure_first_qubit::Bool=true, unitaries_type::Symbol=:Cliffords, measure_I5::Bool=true)
+function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state, is_pbc::Bool; extract_gates::Bool=false, measure_first_qubit::Bool=true, unitaries_type::Symbol=:Cliffords, measure_I5::Bool=true, measure_I3::Bool=true)
     # Validate inputs
     if !(length(p_ar)==L)
         throw(ArgumentError("probability vector p_ar must have length L"))
@@ -452,6 +452,11 @@ function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state
                     Vector{Int}(div(3*L, 5)+1:div(4*L, 5)),
                     Vector{Int}(div(4*L, 5)+1:L)]  # Five equal partitions for I5
     end
+    if measure_I3
+        A_quarterL = Vector{Int}(1:div(L, 4))  # First quarter of qubits
+        B_quarterL = Vector{Int}(div(L, 4)+1:div(L, 2))  # Second quarter of qubits
+        C_quarterL = Vector{Int}(div(L, 2)+1:div(L, 2)+div(L, 4))  # Third quarter of qubits
+    end
     # Initialize observables record
     entropy_record = Vector{Int}(undef, 2*T)
     N_meas_record = Vector{Int}(undef, 2*T)
@@ -459,6 +464,9 @@ function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state
     I2_record = Vector{Int}(undef, 2*T)
     if measure_I5
         I5_record = Vector{Int}(undef, 2*T)
+    end
+    if measure_I3
+        I3_record = Vector{Int}(undef, 2*T)
     end
     
     # Main circuit loop
@@ -513,6 +521,15 @@ function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state
             end
             I5_record[2*t-1] = i5_t
         end
+        if measure_I3
+            I3_record[2*t-1] = state_EE(state, A_quarterL)+
+                               state_EE(state, B_quarterL)+
+                               state_EE(state, C_quarterL)-
+                               state_EE(state, vcat(A_quarterL, B_quarterL))-
+                               state_EE(state, vcat(B_quarterL, C_quarterL))-
+                               state_EE(state, vcat(A_quarterL, C_quarterL))+
+                               state_EE(state, vcat(A_quarterL, B_quarterL, C_quarterL))
+        end
 
         # === ODD BONDS LAYER ===
         if extract_gates
@@ -566,21 +583,37 @@ function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state
             end
             I5_record[2*t] = i5_t
         end
+        if measure_I3
+            I3_record[2*t] = state_EE(state, A_quarterL)+
+                             state_EE(state, B_quarterL)+
+                             state_EE(state, C_quarterL)-
+                             state_EE(state, vcat(A_quarterL, B_quarterL))-
+                             state_EE(state, vcat(B_quarterL, C_quarterL))-
+                             state_EE(state, vcat(A_quarterL, C_quarterL))+
+                             state_EE(state, vcat(A_quarterL, B_quarterL, C_quarterL))
+        end
     end
     
-    if extract_gates
-        if measure_I5
-            return state, entropy_record, N_meas_record, N_det_record, I2_record, I5_record, measurement_record, gates_record
-        else
-            return state, entropy_record, N_meas_record, N_det_record, I2_record, measurement_record, gates_record
-        end
-    else
-        if measure_I5
-            return state, entropy_record, N_meas_record, N_det_record, I2_record, I5_record, measurement_record
-        else
-            return state, entropy_record, N_meas_record, N_det_record, I2_record, measurement_record
-        end
+    result = (
+        state = state,
+        entropy_record = entropy_record,
+        N_meas_record = N_meas_record,
+        N_det_record = N_det_record,
+        I2_record = I2_record,
+        measurement_record = measurement_record
+    )
+
+    if measure_I5
+        result = merge(result, (I5_record = I5_record,))
     end
+    if measure_I3
+        result = merge(result, (I3_record = I3_record,))
+    end
+    if extract_gates
+        result = merge(result, (gates_record = gates_record,))
+    end
+
+    return result
 end
 
 
