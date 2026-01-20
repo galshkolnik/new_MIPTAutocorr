@@ -76,12 +76,12 @@ end
 
 
 """
-Simulate a brickwork monitored quantum circuit (Allows for quenched disorder).
+Simulate a brickwork monitored quantum circuit.
 
 Parameters:
 - L: Number of qubits
 - T: Number of time layers  
-- p_ar: Vector of measurement probabilities (0 ≤ p ≤ 1)
+- p: Measurement probability (0 ≤ p ≤ 1)
 - initial_state_type: Type of initial state (:product_0, :product_rand, :fully_mixed)
 - is_pbc: Boolean for periodic boundary conditions
 
@@ -89,8 +89,211 @@ Returns:
 - final_state: The quantum state after T layers
 - measurement_record: Array of measurement outcomes for each layer
 """
+function brickwork_circuit(L::Int, T::Int, p::Float64, state, is_pbc::Bool; extract_gates::Bool=false, measure_first_qubit::Bool=true, unitaries_type::Symbol=:Cliffords)
+    # Validate inputs
+    if !(0 ≤ p ≤ 1)
+        throw(ArgumentError("Measurement probability p must be between 0 and 1"))
+    end
+    if !(unitaries_type in [:Cliffords, :DualUnitaries])
+        throw(ArgumentError("Invalid unitaries_type. Must be :Cliffords or :DualUnitaries"))
+    end
+    
+    # Pre-compute bond lists (create once, use many times)
+    # === ODD BONDS: [1,2], [3,4], [5,6], ... ===
+    odd_bonds = []
+    for i in 1:div(L, 2)
+        push!(odd_bonds, (2*i-1, 2*i))
+    end
+    # Add periodic boundary condition for odd bonds if L is odd
+    if is_pbc && (L % 2 == 1)
+        push!(odd_bonds, (L, 1))
+    end
+    
+    # === EVEN BONDS: [2,3], [4,5], [6,7], ... ===
+    even_bonds = []
+    for i in 1:div(L-1, 2)
+        push!(even_bonds, (2*i, 2*i+1))
+    end
+    # Add periodic boundary condition for even bonds if L is even
+    if is_pbc && (L % 2 == 0)
+        push!(even_bonds, (L, 1))
+    end
+    
+    # Track measurement outcomes: [time_step][qubit] -> outcome (or nothing if not measured)
+    measurement_record = []
+    gates_record = []
+    
+    # Main circuit loop
+    for t in 1:T
+        # === EVEN BONDS LAYER ===
+        if extract_gates
+            gates_realization_even = Vector{Union{Nothing, Int}}(nothing, length(even_bonds))
+        end
+        # Apply random Clifford gates on even bonds
+        for (bond_ind,(q1, q2)) in enumerate(even_bonds)
+            if unitaries_type == :Cliffords
+                # Use Clifford gates
+                gate_index = rand(0:11519)  # Random Clifford gate index
+                apply_random_two_qubit_clifford!(q1, q2, state, gate_index=gate_index)
+            else # unitaries_type == :DualUnitaries
+                # Use dual-unitary gates (not implemented here, placeholder)
+                gate_index = rand(0:5759)  # Placeholder for dual-unitary gate index
+                apply_random_two_qubit_dual_unitary!(q1, q2, state, gate_index=gate_index)
+            end
+            
+            if extract_gates; gates_realization_even[bond_ind]=gate_index; end
+        end
+        if extract_gates; push!(gates_record, gates_realization_even); end
+        
+        # === FIRST MEASUREMENT LAYER ===
+        measurement_outcomes_1 = Vector{Union{Nothing, Int}}(nothing, L)
+        for qubit in 1:L
+            if qubit == 1 && (!measure_first_qubit)
+                continue  # Skip measurement of first qubit if not required
+            elseif rand() < p  # Measure with probability p
+                state, outcome, is_det = measure_z!(qubit, state)
+                measurement_outcomes_1[qubit] = outcome
+            end
+        end
+        push!(measurement_record, measurement_outcomes_1)
 
-function brickwork_circuit(L::Int, T::Int, p_ar::Vector{Float64}, state, is_pbc::Bool; measure_first_qubit::Bool=true, unitaries_type::Symbol=:Cliffords)
+        # === ODD BONDS LAYER ===
+        if extract_gates
+            gates_realization_odd = Vector{Union{Nothing, Int}}(nothing, length(odd_bonds))
+        end
+        # Apply random Clifford gates on odd bonds
+        for (bond_ind,(q1, q2)) in enumerate(odd_bonds)
+            if unitaries_type == :Cliffords
+                # Use Clifford gates
+                gate_index = rand(0:11519)  # Random Clifford gate index
+                apply_random_two_qubit_clifford!(q1, q2, state, gate_index=gate_index)
+            else # unitaries_type == :DualUnitaries
+                # Use dual-unitary gates (not implemented here, placeholder)
+                gate_index = rand(0:5759)  # Placeholder for dual-unitary gate index
+                apply_random_two_qubit_dual_unitary!(q1, q2, state, gate_index=gate_index)
+            end
+            if extract_gates; gates_realization_odd[bond_ind]=gate_index; end
+        end
+        if extract_gates; push!(gates_record, gates_realization_odd); end
+        
+        # === SECOND MEASUREMENT LAYER ===
+        measurement_outcomes_2 = Vector{Union{Nothing, Int}}(nothing, L)
+        if t<T
+            for qubit in 1:L
+                if qubit == 1 && (!measure_first_qubit)
+                    continue  # Skip measurement of first qubit if not required
+                elseif rand() < p  # Measure with probability p
+                    state, outcome, is_det = measure_z!(qubit, state)
+                    measurement_outcomes_2[qubit] = outcome
+                end
+            end
+        end
+        push!(measurement_record, measurement_outcomes_2)
+    end
+    
+    if extract_gates
+        return state, measurement_record, gates_record
+    else
+        return state, measurement_record
+    end
+end
+
+
+"""
+Simulate a brickwork monitored quantum circuit with given gates and measurements.
+"""
+function brickwork_circuit(L::Int, T::Int, state, is_pbc::Bool; measurement_gates::Vector{Any}, unitary_gates::Vector{Any}, unitaries_type::Symbol=:Cliffords)
+
+    # Validate inputs
+    if !(length(unitary_gates) == 2*T && length(measurement_gates) == 2*T)
+        throw(ArgumentError("Invalid gate configuration: must have 2T layers of gates"))
+    end
+        if !(unitaries_type in [:Cliffords, :DualUnitaries])
+        throw(ArgumentError("Invalid unitaries_type. Must be :Cliffords or :DualUnitaries"))
+    end
+    
+    # Pre-compute bond lists (create once, use many times)
+    # === ODD BONDS: [1,2], [3,4], [5,6], ... ===
+    odd_bonds = []
+    for i in 1:div(L, 2)
+        push!(odd_bonds, (2*i-1, 2*i))
+    end
+    # Add periodic boundary condition for odd bonds if L is odd
+    if is_pbc && (L % 2 == 1)
+        push!(odd_bonds, (L, 1))
+    end
+    
+    # === EVEN BONDS: [2,3], [4,5], [6,7], ... ===
+    even_bonds = []
+    for i in 1:div(L-1, 2)
+        push!(even_bonds, (2*i, 2*i+1))
+    end
+    # Add periodic boundary condition for even bonds if L is even
+    if is_pbc && (L % 2 == 0)
+        push!(even_bonds, (L, 1))
+    end
+    
+    # Track measurement outcomes: [time_step][qubit] -> outcome (or nothing if not measured)
+    measurement_record = []
+    
+    # Main circuit loop
+    for t in 1:T
+        # === EVEN BONDS LAYER ===
+        # Apply random Clifford gates on even bonds
+        for (jj,(q1, q2)) in enumerate(even_bonds)
+            gate_index = unitary_gates[2*t-1][jj]
+            if unitaries_type == :Cliffords
+                # Use Clifford gates
+                apply_random_two_qubit_clifford!(q1, q2, state, gate_index=gate_index)
+            else # unitaries_type == :DualUnitaries
+                # Use dual-unitary gates
+                apply_random_two_qubit_dual_unitary!(q1, q2, state, gate_index=gate_index)
+            end
+        end
+        
+        # === FIRST MEASUREMENT LAYER ===
+        measurement_outcomes_1 = Vector{Union{Nothing, Int}}(nothing, L)
+        for qubit in 1:L
+            if !isnothing(measurement_gates[2*t-1][qubit]) # Measure this qubit
+                state, outcome, is_det = measure_z!(qubit, state, meas_outcome=measurement_gates[2*t-1][qubit])
+                measurement_outcomes_1[qubit] = outcome
+            end
+        end
+        push!(measurement_record, measurement_outcomes_1)
+        
+        # === ODD BONDS LAYER ===
+        # Apply random Clifford gates on odd bonds
+        for (jj,(q1, q2)) in enumerate(odd_bonds)
+            gate_index = unitary_gates[2*t][jj]
+            if unitaries_type == :Cliffords
+                # Use Clifford gates
+                apply_random_two_qubit_clifford!(q1, q2, state, gate_index=gate_index)
+            else # unitaries_type == :DualUnitaries
+                # Use dual-unitary gates
+                apply_random_two_qubit_dual_unitary!(q1, q2, state, gate_index=gate_index)
+            end
+        end
+        
+        # === SECOND MEASUREMENT LAYER ===
+        measurement_outcomes_2 = Vector{Union{Nothing, Int}}(nothing, L)
+        if t<T
+            for qubit in 1:L
+                if !isnothing(measurement_gates[2*t][qubit]) # Measure this qubit
+                    state, outcome, is_det = measure_z!(qubit, state, meas_outcome=measurement_gates[2*t][qubit])
+                    measurement_outcomes_2[qubit] = outcome
+                end
+            end
+        end
+        push!(measurement_record, measurement_outcomes_2)
+    end
+    
+    return state, measurement_record
+end
+
+"""
+Allows for quenched disorder.
+"""
+function brickwork_circuit(L::Int, T::Int, p_ar::Vector{Float64}, state, is_pbc::Bool; extract_gates::Bool=false, measure_first_qubit::Bool=true, unitaries_type::Symbol=:Cliffords)
     # Validate inputs
     if !(length(p_ar)==L)
         throw(ArgumentError("probability vector p_ar must have length L"))
@@ -127,18 +330,24 @@ function brickwork_circuit(L::Int, T::Int, p_ar::Vector{Float64}, state, is_pbc:
     # Main circuit loop
     for t in 1:T
         # === EVEN BONDS LAYER ===
+        if extract_gates
+            # If extracting gates, we need to store the gate indices
+            gates_realization_even = Vector{Union{Nothing, Int}}(nothing, length(even_bonds))
+        end
         # Apply random Clifford gates on even bonds
         for (bond_ind,(q1, q2)) in enumerate(even_bonds)
             if unitaries_type == :Cliffords
                 # Use Clifford gates
-                gate = random_clifford(2)
-                apply!(state, gate, [q1, q2])
+                gate_index = rand(0:11519)  # Random Clifford gate index
+                apply_random_two_qubit_clifford!(q1, q2, state, gate_index=gate_index)
             else # unitaries_type == :DualUnitaries
                 # Use dual-unitary gates (not implemented here, placeholder)
                 gate_index = rand(0:5759)  # Placeholder for dual-unitary gate index
                 apply_random_two_qubit_dual_unitary!(q1, q2, state, gate_index=gate_index)
             end
+            if extract_gates; gates_realization_even[bond_ind]=gate_index; end
         end
+        if extract_gates; push!(gates_record, gates_realization_even); end
         
         # === FIRST MEASUREMENT LAYER ===
         measurement_outcomes_1 = Vector{Union{Nothing, Int}}(nothing, L)
@@ -153,18 +362,24 @@ function brickwork_circuit(L::Int, T::Int, p_ar::Vector{Float64}, state, is_pbc:
         push!(measurement_record, measurement_outcomes_1)
 
         # === ODD BONDS LAYER ===
+        if extract_gates
+            # If extracting gates, we need to store the gate indices
+            gates_realization_odd = Vector{Union{Nothing, Int}}(nothing, length(odd_bonds))
+        end
         # Apply random Clifford gates on odd bonds
         for (bond_ind,(q1, q2)) in enumerate(odd_bonds)
             if unitaries_type == :Cliffords
                 # Use Clifford gates
-                gate = random_clifford(2)
-                apply!(state, gate, [q1, q2])
+                gate_index = rand(0:11519)  # Random Clifford gate index
+                apply_random_two_qubit_clifford!(q1, q2, state, gate_index=gate_index)
             else # unitaries_type == :DualUnitaries
                 # Use dual-unitary gates (not implemented here, placeholder)
                 gate_index = rand(0:5759)  # Placeholder for dual-unitary gate index
                 apply_random_two_qubit_dual_unitary!(q1, q2, state, gate_index=gate_index)
             end
+            if extract_gates; gates_realization_odd[bond_ind]=gate_index; end
         end
+        if extract_gates; push!(gates_record, gates_realization_odd); end
         
         # === SECOND MEASUREMENT LAYER ===
         measurement_outcomes_2 = Vector{Union{Nothing, Int}}(nothing, L)
@@ -181,14 +396,18 @@ function brickwork_circuit(L::Int, T::Int, p_ar::Vector{Float64}, state, is_pbc:
         push!(measurement_record, measurement_outcomes_2)
     end
     
-    return state, measurement_record
+    if extract_gates
+        return state, measurement_record, gates_record
+    else
+        return state, measurement_record
+    end
 end
 
 
 """
 Measures the entropy each time step.
 """
-function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state, is_pbc::Bool; measure_first_qubit::Bool=true, unitaries_type::Symbol=:Cliffords, measure_I5::Bool=true, measure_I3::Bool=true)
+function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state, is_pbc::Bool; extract_gates::Bool=false, measure_first_qubit::Bool=true, unitaries_type::Symbol=:Cliffords, measure_I5::Bool=true, measure_I3::Bool=true)
     # Validate inputs
     if !(length(p_ar)==L)
         throw(ArgumentError("probability vector p_ar must have length L"))
@@ -253,18 +472,24 @@ function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state
     # Main circuit loop
     for t in 1:T
         # === EVEN BONDS LAYER ===
+        if extract_gates
+            # If extracting gates, we need to store the gate indices
+            gates_realization_even = Vector{Union{Nothing, Int}}(nothing, length(even_bonds))
+        end
         # Apply random Clifford gates on even bonds
         for (bond_ind,(q1, q2)) in enumerate(even_bonds)
             if unitaries_type == :Cliffords
                 # Use Clifford gates
-                gate = random_clifford(2)
-                apply!(state, gate, [q1, q2])
+                gate_index = rand(0:11519)  # Random Clifford gate index
+                apply_random_two_qubit_clifford!(q1, q2, state, gate_index=gate_index)
             else # unitaries_type == :DualUnitaries
                 # Use dual-unitary gates (not implemented here, placeholder)
                 gate_index = rand(0:5759)  # Placeholder for dual-unitary gate index
                 apply_random_two_qubit_dual_unitary!(q1, q2, state, gate_index=gate_index)
             end
+            if extract_gates; gates_realization_even[bond_ind]=gate_index; end
         end
+        if extract_gates; push!(gates_record, gates_realization_even); end
         
         # === FIRST MEASUREMENT LAYER ===
         N_meas = 0 # Number of measurements in this layer
@@ -307,18 +532,24 @@ function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state
         end
 
         # === ODD BONDS LAYER ===
+        if extract_gates
+            # If extracting gates, we need to store the gate indices
+            gates_realization_odd = Vector{Union{Nothing, Int}}(nothing, length(odd_bonds))
+        end
         # Apply random Clifford gates on odd bonds
         for (bond_ind,(q1, q2)) in enumerate(odd_bonds)
             if unitaries_type == :Cliffords
                 # Use Clifford gates
-                gate = random_clifford(2)
-                apply!(state, gate, [q1, q2])
+                gate_index = rand(0:11519)  # Random Clifford gate index
+                apply_random_two_qubit_clifford!(q1, q2, state, gate_index=gate_index)
             else # unitaries_type == :DualUnitaries
                 # Use dual-unitary gates (not implemented here, placeholder)
                 gate_index = rand(0:5759)  # Placeholder for dual-unitary gate index
                 apply_random_two_qubit_dual_unitary!(q1, q2, state, gate_index=gate_index)
             end
+            if extract_gates; gates_realization_odd[bond_ind]=gate_index; end
         end
+        if extract_gates; push!(gates_record, gates_realization_odd); end
         
         # === SECOND MEASUREMENT LAYER ===
         N_meas = 0 # Number of measurements in this layer
@@ -377,6 +608,9 @@ function brickwork_circuit_dynamics(L::Int, T::Int, p_ar::Vector{Float64}, state
     end
     if measure_I3
         result = merge(result, (I3_record = I3_record,))
+    end
+    if extract_gates
+        result = merge(result, (gates_record = gates_record,))
     end
 
     return result

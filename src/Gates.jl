@@ -143,7 +143,7 @@ function apply_random_two_qubit_clifford!(qubit1::Int, qubit2::Int, state; gate_
         if i1 == 2
             apply_single_qubit_clifford!(8, qubit1, state)  # "-X/2, -Y/2"
         elseif i1 == 3
-            apply_single_qubit_clifford!(9, qubit2, state)  # "Y/2, X/2"
+            apply_single_qubit_clifford!(9, qubit1, state)  # "Y/2, X/2"
         end
         # i1 == 1: do nothing (identity)
         
